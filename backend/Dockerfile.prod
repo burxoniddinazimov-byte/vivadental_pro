@@ -1,0 +1,45 @@
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создаем виртуальное окружение
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Устанавливаем зависимости
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Финальный образ
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Копируем виртуальное окружение
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Создаем непривилегированного пользователя
+RUN groupadd -r vivadental && useradd -r -g vivadental vivadental
+
+# Копируем код приложения
+COPY . .
+
+# Создаем директории
+RUN mkdir -p /app/logs /app/uploads \
+    && chown -R vivadental:vivadental /app
+
+# Переключаемся на непривилегированного пользователя
+USER vivadental
+
+# Экспортируем порт
+EXPOSE 8000
+
+# Команда запуска
+CMD ["gunicorn", "app.main:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]

@@ -1,0 +1,105 @@
+{
+  "dashboard": {
+    "title": "VivaDental Application Dashboard",
+    "description": "Monitoring for VivaDental application",
+    "tags": ["vivadental", "production"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "title": "HTTP Requests",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(http_requests_total[5m])",
+            "legendFormat": "{{method}} {{endpoint}}"
+          }
+        ],
+        "yAxis": {
+          "format": "reqps"
+        }
+      },
+      {
+        "title": "Request Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+            "legendFormat": "p95 {{endpoint}}"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))",
+            "legendFormat": "p99 {{endpoint}}"
+          }
+        ],
+        "yAxis": {
+          "format": "s"
+        }
+      },
+      {
+        "title": "Active Users",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(http_requests_active)"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "red", "value": 100}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Database Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(db_queries_total[5m])",
+            "legendFormat": "{{operation}} {{table}}"
+          }
+        ]
+      },
+      {
+        "title": "Business Metrics",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "patients_total",
+            "legendFormat": "Total Patients"
+          },
+          {
+            "expr": "sum(appointments_total)",
+            "legendFormat": "Total Appointments"
+          },
+          {
+            "expr": "revenue_total",
+            "legendFormat": "Total Revenue"
+          }
+        ]
+      },
+      {
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "container_cpu_usage_seconds_total{container=~\"backend|frontend|postgres|redis\"}",
+            "legendFormat": "{{container}}"
+          },
+          {
+            "expr": "container_memory_usage_bytes{container=~\"backend|frontend|postgres|redis\"}",
+            "legendFormat": "{{container}}"
+          }
+        ]
+      }
+    ],
+    "refresh": "30s"
+  }
+}

@@ -1,0 +1,62 @@
+groups:
+  - name: vivadental_alerts
+    rules:
+      # High error rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.endpoint }}"
+          description: "Error rate is {{ $value | humanizePercentage }} for endpoint {{ $labels.endpoint }}"
+      
+      # High latency
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on {{ $labels.endpoint }}"
+          description: "95th percentile latency is {{ $value }}s for endpoint {{ $labels.endpoint }}"
+      
+      # Service down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} has been down for more than 1 minute"
+      
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage in {{ $labels.container }}"
+          description: "Memory usage is {{ $value | humanizePercentage }} for container {{ $labels.container }}"
+      
+      # Database connection pool exhausted
+      - alert: DatabaseConnectionsExhausted
+        expr: pg_stat_database_numbackends{datname="vivadental_prod"} > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Database connections exhausted"
+          description: "Database connections at {{ $value }}% of maximum"
+      
+      # Revenue drop
+      - alert: RevenueDrop
+        expr: predict_linear(revenue_total[1h], 3600) < 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Revenue drop detected"
+          description: "Revenue is predicted to drop in the next hour"

@@ -1,0 +1,159 @@
+version: '3.8'
+
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-vivadental}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-securepassword123}
+      POSTGRES_DB: ${DB_NAME:-vivadental_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - vivadental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-vivadental}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass123}
+    volumes:
+      - redis_data:/data
+    networks:
+      - vivadental-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-vivadental}:${DB_PASSWORD:-securepassword123}@postgres/${DB_NAME:-vivadental_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispass123}@redis:6379/0
+      SECRET_KEY: ${SECRET_KEY:-change-this-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://frontend:80,http://localhost:3000}
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+    volumes:
+      - ./logs/backend:/app/logs
+      - ./data/uploads:/app/uploads
+    networks:
+      - vivadental-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      VITE_API_URL: /api
+      VITE_APP_NAME: VivaDental
+      VITE_APP_ENV: production
+    volumes:
+      - ./logs/frontend:/var/log/nginx
+    networks:
+      - vivadental-network
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Nginx (обратный прокси)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    networks:
+      - vivadental-network
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-vivadental}:${DB_PASSWORD:-securepassword123}@postgres/${DB_NAME:-vivadental_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispass123}@redis:6379/0
+      ENVIRONMENT: production
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    volumes:
+      - ./logs/celery:/app/logs
+    networks:
+      - vivadental-network
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  # Celery Beat (периодические задачи)
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-vivadental}:${DB_PASSWORD:-securepassword123}@postgres/${DB_NAME:-vivadental_db}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispass123}@redis:6379/0
+      ENVIRONMENT: production
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    volumes:
+      - ./logs/celery:/app/logs
+    networks:
+      - vivadental-network
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  # Certbot для SSL (опционально)
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./data/certbot/conf:/etc/letsencrypt
+      - ./data/certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+    networks:
+      - vivadental-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  vivadental-network:
+    driver: bridge
